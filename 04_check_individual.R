@@ -39,9 +39,11 @@ library(shinystan)
 # Load data
 
 load("input/daily_data.RData")
+head(data)
 
 # Set variables defining the dlnm model
 load("output/dlnm_configuration.RData")
+dlnm_var  
 
 # Set variables for trend and seasonality
 
@@ -50,7 +52,7 @@ data <- subset(data, month(date) %in% 6:9)
 data <- subset(data, year(date) %in% 2007:2016)
 
 data$year <- factor(lubridate::year(data$date))
-
+head(data)
 # Create crossbasis for each region
 
 # Ensure that the data is ordered by region to maintain alignment between 
@@ -64,8 +66,9 @@ list_X <- vector("list", dlnm_var$n_reg)
 for(i_reg in 1:dlnm_var$n_reg) {
   
       ## this is all the same as in 01_data_preparation.R
-  
-      temp <- subset(data, region == i_reg, 
+      
+      ## >> needed to make this sprintf because `region` is a string
+      temp <- subset(data, region == sprintf("%02i", i_reg), 
                      select = c("temp", paste0("lag", 1:dlnm_var$max_lag)))
       
       temp_knots <- quantile(temp$temp, dlnm_var$var_prc, na.rm = TRUE)
@@ -79,17 +82,11 @@ for(i_reg in 1:dlnm_var$n_reg) {
                                      knots = logknots(dlnm_var$max_lag, 
                                                       dlnm_var$lagnk),
                                      intercept = TRUE))
-      
-      cb
-      
-  
+
+    
   ##
   list_X[[i_reg]] <- cb
 }
-
-dim(cb)        
-tail(cb)
-
 
 # PREPARE DATA FOR THE CASE-CROSSOVER DESIGN
 
@@ -121,14 +118,17 @@ df_local_agg <- df_local %>%
     .groups = 'keep',
     sum_mort = sum(mort)
   ) %>% 
-  mutate(keep = 1)
+  mutate(keep = ifelse(sum_mort > 0, 1, 0))
 
 df_local <- left_join(df_local, df_local_agg)
+table(df_local$keep, useNA = 'always')
 
 # quasi-poisson
-m1.std <- gnm(mort ~ cb_local + factor(strata), data = df_local,
+m1.std <- gnm(mort ~ cb_local + factor(strata), 
+              data = df_local,
               family = quasipoisson,
               subset = keep == 1)
+
 cp1 <- crosspred(cb_local, m1.std)
 plot(cp1, 'overall')
 
@@ -137,9 +137,12 @@ load("input/result_paper/final_simsmatrix_model1_independent_casecrossover.RData
 for(i_reg in 1:73) {
   beta_reg1 <- winbugs_res[,grepl(paste0("^beta\\[", i_reg,","), 
                                   colnames(winbugs_res))]
+  
   xx <- cbind("paper" = apply(beta_reg1, 2, median), 
         "freq-P" = coef(m1.std)[2:13] )
+  
   if(sum(apply(xx, 1, function(a) abs(a[1] - a[2])^2)) < 1 ) stop()
+  
   print(xx)
 }
 rm(winbugs_res); gc();
